@@ -1,0 +1,81 @@
+# Use the base image
+FROM timongentzsch/l4t-ubuntu20-pytorch:latest
+
+# Set environment variables to avoid interactive prompts during build
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install dependencies
+RUN apt-get update && apt-get install -y \
+    software-properties-common \
+    curl \
+    python3-pip \
+    python3-flake8-docstrings \
+    python3-pytest-cov \
+    git \
+    build-essential \
+    sudo \
+    lsb-release \
+    && apt-get clean
+
+# Add ROS repository key and source list
+RUN curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key -o /usr/share/keyrings/ros-archive-keyring.gpg && \
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu $(lsb_release -c | awk '{print $2}') main" | tee /etc/apt/sources.list.d/ros2.list > /dev/null && \
+    apt-get update && apt-get install -y \
+    python3-pip \
+    python3-flake8-docstrings \
+    python3-pytest-cov \
+    ros-dev-tools \
+    && apt-get clean
+
+# Install OpenCV
+RUN pip3 install ultralytics && \
+    pip3 uninstall -y opencv-python opencv-contrib-python opencv-contrib-python-headless && \
+    pip3 install opencv-contrib-python==4.5.1.48
+
+# Install additional flake8 and pytest packages
+RUN python3 -m pip install -U \
+    flake8-blind-except \
+    flake8-builtins \
+    flake8-class-newline \
+    flake8-comprehensions \
+    flake8-deprecated \
+    flake8-import-order \
+    flake8-quotes \
+    "pytest>=5.3" \
+    pytest-repeat \
+    pytest-rerunfailures
+
+# Setup ROS 2 workspace
+RUN mkdir -p /root/ros2_humble/src && \
+    cd /root/ros2_humble && \
+    vcs import --input https://raw.githubusercontent.com/ros2/ros2/humble/ros2.repos src
+
+RUN cd /root/ros2_humble && rosdep init && \
+    rosdep update && \
+    rosdep install --from-paths src --ignore-src -y --skip-keys "fastcdr rti-connext-dds-6.0.1 urdfdom_headers"
+
+RUN cd /root/ros2_humble && colcon build --symlink-install
+
+# Setup YOLO ROS workspace
+RUN mkdir -p /root/ros2_ws/src && \
+    cd /root/ros2_ws/src && \
+    git clone https://github.com/mgonzs13/yolo_ros && \
+    git clone https://github.com/ros-perception/vision_opencv.git -b humble && \
+    cd /root/ros2_ws && \
+    rosdep update --include-eol-distros && \
+    source /root/ros2_humble/install/setup.bash && \
+    rosdep install --from-paths src --ignore-src -y --rosdistro humble && \
+    colcon build --symlink-install
+
+# Source ROS setups into .bashrc
+RUN echo "source /root/ros2_humble/install/setup.bash" >> /root/.bashrc && \
+    echo "source /root/ros2_ws/install/setup.bash" >> /root/.bashrc
+
+# Set working directory
+WORKDIR /root
+
+# Set default shell to bash
+SHELL ["/bin/bash", "-c"]
+
+# By default, run bash
+CMD ["bash"]
